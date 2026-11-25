@@ -2,6 +2,8 @@
 
 An interactive look at ten years of postgraduate admission outcomes from BITS Pilani. The project consolidates yearly spreadsheets with changing formats into one dataset, then surfaces trends across universities, majors, test scores, and work experience.
 
+**[Open the live dashboard](https://bits-ms-admits.streamlit.app/)**
+
 ## What it includes
 
 - Year-by-year admission trends from 2015–2024
