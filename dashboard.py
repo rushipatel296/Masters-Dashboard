@@ -1,93 +1,224 @@
-import streamlit as st
+from pathlib import Path
+
 import pandas as pd
-import matplotlib.pyplot as plt
-from collections import Counter
+import streamlit as st
 
-# Load data
-df = pd.read_csv("consolidated_ms_admits.csv")
 
-# Convert numeric fields
-for col in ["GRE_Verbal", "GRE_Quant", "GRE_AWA", "TOEFL", "CGPA"]:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
+DATA_PATH = Path(__file__).with_name("consolidated_ms_admits.csv")
+SCORE_RANGES = {
+    "CGPA": (0, 10),
+    "GRE_Verbal": (130, 170),
+    "GRE_Quant": (130, 170),
+    "GRE_AWA": (0, 6),
+    "TOEFL": (1, 120),
+}
 
-# Funded flag
-df["IsFunded"] = df["AdmitType"].notna()
 
-# Sidebar
-st.sidebar.title("Filters")
-selected_year = st.sidebar.multiselect("Select Year(s)", sorted(df["Year"].dropna().unique()), default=df["Year"].dropna().unique())
-df = df[df["Year"].isin(selected_year)]
+@st.cache_data
+def load_data() -> pd.DataFrame:
+    df = pd.read_csv(DATA_PATH)
 
-# Title
-st.title("MS Admits Dashboard")
-st.write(f"Total records: {len(df)}")
+    for column, (minimum, maximum) in SCORE_RANGES.items():
+        values = pd.to_numeric(df[column], errors="coerce")
+        df[column] = values.where(values.between(minimum, maximum))
 
-# Charts
-st.subheader("Top Admit Universities")
-st.bar_chart(df["AdmitUniversity"].value_counts().head(10))
+    df["TargetMajor"] = df["TargetMajor"].astype("string").str.strip()
+    df["AdmitUniversity"] = df["AdmitUniversity"].astype("string").str.strip()
+    df["IsCS"] = df["TargetMajor"].str.contains("computer science", case=False, na=False)
+    return df
 
-st.subheader("Top Target Majors")
-st.bar_chart(df["TargetMajor"].value_counts().head(10))
 
-st.subheader("Funding Stats")
-st.bar_chart(df["IsFunded"].value_counts().rename({True: "Funded", False: "Not Funded"}))
+def counts_table(series: pd.Series, label: str, limit: int = 10) -> pd.DataFrame:
+    return (
+        series.dropna()
+        .value_counts()
+        .head(limit)
+        .rename_axis(label)
+        .reset_index(name="Admits")
+    )
 
-st.subheader("Work Experience Distribution")
-st.bar_chart(df["HasWorkEx"].value_counts().rename({True: "With Work Ex", False: "Without Work Ex"}))
 
-st.subheader("Average CGPA by Major")
-avg_cgpa = df.groupby("TargetMajor")["CGPA"].mean().sort_values(ascending=False).head(10)
-st.bar_chart(avg_cgpa)
+st.set_page_config(
+    page_title="BITS Pilani MS Admits Explorer",
+    page_icon="🎓",
+    layout="wide",
+)
 
-st.subheader("Average GRE Quant by Admit University")
-avg_gre = df.groupby("AdmitUniversity")[["GRE_Verbal", "GRE_Quant", "GRE_AWA"]].mean()
-st.dataframe(avg_gre.sort_values("GRE_Quant", ascending=False).head(10))
+df = load_data()
 
-st.subheader("Admits per Year")
-st.line_chart(df.groupby("Year")["Name"].count())
+st.title("BITS Pilani MS Admits Explorer")
+st.caption(
+    "Ten years of postgraduate admission outcomes, cleaned from yearly spreadsheets "
+    "and explored through an interactive dashboard."
+)
 
-# CS-focused section
-st.title("MS Admits Data Explorer")
-st.header("📊 Computer Science Analytics")
+with st.sidebar:
+    st.header("Filters")
+    available_years = sorted(df["Year"].dropna().astype(int).unique())
+    selected_years = st.multiselect(
+        "Admission years",
+        available_years,
+        default=available_years,
+    )
+    st.caption("Scores outside their documented ranges are treated as missing.")
 
-# Filter CS entries
-df["TargetMajor"] = df["TargetMajor"].astype(str).str.strip().str.lower()
-cs_df = df[df["TargetMajor"].str.contains("computer science", na=False)]
+filtered = df[df["Year"].isin(selected_years)] if selected_years else df.iloc[0:0]
+cs_df = filtered[filtered["IsCS"]]
 
-st.subheader("Top Universities for CS Admits")
-top_cs_admits = cs_df["AdmitUniversity"].value_counts().head(10)
-st.dataframe(top_cs_admits)
+metric_columns = st.columns(4)
+metric_columns[0].metric("Admit records", f"{len(filtered):,}")
+metric_columns[1].metric("Years covered", filtered["Year"].nunique())
+metric_columns[2].metric("Universities", filtered["AdmitUniversity"].nunique())
+metric_columns[3].metric("Computer Science", f"{len(cs_df):,}")
 
-fig, ax = plt.subplots()
-top_cs_admits.plot(kind="barh", ax=ax)
-ax.set_xlabel("Number of CS Admits")
-ax.set_ylabel("University")
-st.pyplot(fig)
+overview_tab, cs_tab, notes_tab = st.tabs(
+    ["Overview", "Computer Science", "Data notes"]
+)
 
-st.subheader("CGPA Distribution for CS Admits")
-fig, ax = plt.subplots()
-cs_df["CGPA"].dropna().hist(bins=20, ax=ax)
-ax.set_title("CGPA Distribution for CS Admits")
-st.pyplot(fig)
+with overview_tab:
+    left, right = st.columns(2)
 
-st.dataframe(cs_df[["CGPA", "GRE_Quant", "GRE_Verbal", "GRE_AWA", "TOEFL"]].mean())
+    with left:
+        st.subheader("Top admit universities")
+        top_universities = counts_table(filtered["AdmitUniversity"], "University")
+        st.bar_chart(
+            top_universities,
+            x="University",
+            y="Admits",
+            horizontal=True,
+            height=420,
+        )
 
-st.subheader("Most Commonly Applied Universities for CS")
-applied_univs_series = cs_df["AppliedUniversity"].dropna().astype(str).str.lower().str.split(",")
-all_applied_univs = [univ.strip() for sublist in applied_univs_series for univ in sublist]
-applied_counts = Counter(all_applied_univs)
-most_common_applied = pd.Series(dict(applied_counts)).sort_values(ascending=False).head(10)
-st.dataframe(most_common_applied)
+    with right:
+        st.subheader("Most common target majors")
+        top_majors = counts_table(filtered["TargetMajor"], "Major")
+        st.bar_chart(
+            top_majors,
+            x="Major",
+            y="Admits",
+            horizontal=True,
+            height=420,
+        )
 
-# Average CGPA by top CS admit universities
-st.subheader("Average CGPA for Top 20 CS Admit Universities")
-top_20_cs_univs = cs_df["AdmitUniversity"].value_counts().head(20).index
-avg_cgpa_by_univ = cs_df[cs_df["AdmitUniversity"].isin(top_20_cs_univs)].groupby("AdmitUniversity")["CGPA"].mean().sort_values(ascending=False)
-st.dataframe(avg_cgpa_by_univ)
+    left, right = st.columns(2)
 
-fig, ax = plt.subplots()
-avg_cgpa_by_univ.plot(kind="barh", ax=ax)
-ax.set_xlabel("Average CGPA")
-ax.set_ylabel("University")
-ax.set_title("Top 20 CS Admit Universities - Average CGPA")
-st.pyplot(fig)
+    with left:
+        st.subheader("Admits by year")
+        yearly = (
+            filtered.groupby("Year")
+            .size()
+            .rename("Admits")
+            .reset_index()
+            .sort_values("Year")
+        )
+        st.line_chart(yearly, x="Year", y="Admits")
+
+    with right:
+        st.subheader("Work-experience coverage")
+        work_experience = (
+            filtered["HasWorkEx"]
+            .map({True: "With work experience", False: "Without work experience"})
+            .fillna("Not reported")
+            .value_counts()
+            .rename_axis("Status")
+            .reset_index(name="Records")
+        )
+        st.bar_chart(
+            work_experience,
+            x="Status",
+            y="Records",
+            horizontal=True,
+        )
+
+    st.subheader("Average reported scores by popular university")
+    popular_universities = filtered["AdmitUniversity"].value_counts().head(15).index
+    score_summary = (
+        filtered[filtered["AdmitUniversity"].isin(popular_universities)]
+        .groupby("AdmitUniversity")[["CGPA", "GRE_Quant", "GRE_Verbal", "GRE_AWA", "TOEFL"]]
+        .mean()
+        .round(2)
+        .sort_values("GRE_Quant", ascending=False)
+    )
+    st.dataframe(score_summary, width="stretch")
+
+with cs_tab:
+    st.subheader("Computer Science outcomes")
+    st.write(
+        "This view includes records whose target major contains “Computer Science”. "
+        f"The current filters contain **{len(cs_df):,}** such records."
+    )
+
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown("#### Top universities")
+        top_cs_universities = counts_table(cs_df["AdmitUniversity"], "University", 12)
+        st.bar_chart(
+            top_cs_universities,
+            x="University",
+            y="Admits",
+            horizontal=True,
+            height=460,
+        )
+
+    with right:
+        st.markdown("#### CGPA distribution")
+        cgpa_bins = pd.cut(
+            cs_df["CGPA"],
+            bins=[0, 7, 7.5, 8, 8.5, 9, 9.5, 10],
+            include_lowest=True,
+        )
+        cgpa_distribution = (
+            cgpa_bins.value_counts(sort=False)
+            .rename_axis("CGPA range")
+            .reset_index(name="Records")
+        )
+        cgpa_distribution["CGPA range"] = cgpa_distribution["CGPA range"].astype(str)
+        st.bar_chart(cgpa_distribution, x="CGPA range", y="Records")
+
+    st.markdown("#### Average reported scores for popular CS destinations")
+    popular_cs_universities = cs_df["AdmitUniversity"].value_counts().head(15).index
+    cs_score_summary = (
+        cs_df[cs_df["AdmitUniversity"].isin(popular_cs_universities)]
+        .groupby("AdmitUniversity")[["CGPA", "GRE_Quant", "GRE_Verbal", "GRE_AWA", "TOEFL"]]
+        .agg(["mean", "count"])
+        .round(2)
+    )
+    st.dataframe(cs_score_summary, width="stretch")
+
+with notes_tab:
+    st.subheader("How to read this dashboard")
+    st.markdown(
+        """
+        - The source combines yearly spreadsheets from 2015–2024, whose formats and field names varied.
+        - Records are self-reported and may contain inconsistent university or major names.
+        - Invalid numeric scores are excluded from averages: CGPA 0–10, GRE sections 130–170,
+          GRE AWA 0–6, and TOEFL 1–120.
+        - Missing values remain missing; they are not estimated.
+        - Counts describe this dataset, not admissions odds or university rankings.
+        """
+    )
+
+    st.markdown("#### Field coverage")
+    coverage_columns = [
+        "AdmitUniversity",
+        "TargetMajor",
+        "CGPA",
+        "GRE_Quant",
+        "GRE_Verbal",
+        "GRE_AWA",
+        "TOEFL",
+        "HasWorkEx",
+    ]
+    coverage = pd.DataFrame(
+        {
+            "Available": filtered[coverage_columns].notna().sum(),
+            "Missing": filtered[coverage_columns].isna().sum(),
+        }
+    )
+    coverage["Coverage"] = (
+        coverage["Available"].div(len(filtered)).mul(100).round(1).astype(str) + "%"
+        if len(filtered)
+        else "0.0%"
+    )
+    st.dataframe(coverage, width="stretch")
