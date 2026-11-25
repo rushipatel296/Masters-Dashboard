@@ -21,7 +21,9 @@ streamlit run dashboard.py
 
 ## Data note
 
-The source records are self-reported and contain inconsistent naming and missing values. The dashboard excludes scores outside their documented ranges from averages and does not estimate missing data. Its aggregates describe this dataset—not admission probabilities or university rankings.
+The source records are self-reported and contain inconsistent naming and missing values. The public dataset excludes names, campus identifiers, free-text application lists, admit-type notes, and detailed work-history fields. Raw survey exports are intentionally not included in the deployed project.
+
+The dashboard excludes scores outside their documented ranges from averages and does not estimate missing data. Its aggregates describe this dataset—not admission probabilities or university rankings.
 
 ## Built with
 

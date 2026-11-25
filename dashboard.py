@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 
-DATA_PATH = Path(__file__).with_name("consolidated_ms_admits.csv")
+DATA_PATH = Path(__file__).with_name("admissions_public.csv")
 SCORE_RANGES = {
     "CGPA": (0, 10),
     "GRE_Verbal": (130, 170),
